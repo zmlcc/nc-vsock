@@ -30,6 +30,8 @@
 #include <netdb.h>
 #include <linux/vm_sockets.h>
 
+char *ext_pg = NULL;
+
 static int parse_cid(const char *cid_str)
 {
 	char *end = NULL;
@@ -224,25 +226,7 @@ static int get_remote_fd(int argc, char **argv)
 		}
 		if (argc == 5 && strcmp(argv[3], "-e") == 0)
 		{
-			char *pg = argv[4];
-			if (dup2(remote_fd, STDIN_FILENO) < 0)
-			{
-				close(remote_fd);
-				return -1;
-			}
-
-			close(remote_fd);
-			dup2(STDIN_FILENO, STDOUT_FILENO);
-			dup2(STDIN_FILENO, STDERR_FILENO);
-			remote_fd = STDIN_FILENO;
-
-			char *p = strrchr(pg, '/');
-			if (p)
-				p++;
-			else
-				p = pg;
-
-			execl(pg, p, NULL);
+			ext_pg = argv[4];
 		}
 		return remote_fd;
 	}
@@ -252,7 +236,7 @@ static int get_remote_fd(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stderr, "usage: %s [-l <port> [-t <dst> <dstport>] [-e <filename>] | <cid> <port>]\n", argv[0]);
+		fprintf(stderr, "usage: %s [-l <port> [-t <dst> <dstport> | -e <filename>] | <cid> <port>]\n", argv[0]);
 		return -1;
 	}
 }
@@ -338,6 +322,25 @@ static int xfer_data(int in_fd, int out_fd)
 	return 0;
 }
 
+static int run_ext_pg(int remote_fd)
+{
+	if ((dup2(remote_fd, STDIN_FILENO) < 0) || (dup2(STDIN_FILENO, STDOUT_FILENO) < 0) || (dup2(STDIN_FILENO, STDERR_FILENO) < 0))
+	{
+		close(remote_fd);
+		return -1;
+	}
+
+	close(remote_fd);
+
+	char *p = strrchr(ext_pg, '/');
+	if (p)
+		p++;
+	else
+		p = ext_pg;
+
+	return execl(ext_pg, p, NULL);
+}
+
 static void main_loop(int remote_fd)
 {
 	fd_set rfds;
@@ -393,6 +396,13 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	main_loop(remote_fd);
-	return EXIT_SUCCESS;
+	if (ext_pg != NULL)
+	{
+		return run_ext_pg(remote_fd);
+	}
+	else
+	{
+		main_loop(remote_fd);
+		return EXIT_SUCCESS;
+	}
 }
